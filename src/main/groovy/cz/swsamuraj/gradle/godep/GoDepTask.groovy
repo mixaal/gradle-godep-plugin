@@ -36,43 +36,72 @@ import org.gradle.api.provider.Property
 import org.gradle.api.tasks.TaskAction
 import org.gradle.process.ExecSpec
 
-@CompileStatic
+//@CompileStatic
 class GoDepTask extends DefaultTask {
 
-    final Property<String> importPath = project.objects.property(String)
+  final Property<String> importPath = project.objects.property(String)
 
-    GoDepTask() {
-        group = 'go & dep'
-        description = 'Builds the Go project.'
-        dependsOn "prepareWorkspace"
+  GoDepTask() {
+      group = 'go & dep'
+      description = 'Builds the Go project.'
+      dependsOn "prepareWorkspace"
+  }
+
+  @TaskAction
+  void goDep() {
+    File gopkgToml = new File(project.projectDir, "Gopkg.dep")
+    String depCommand
+    logger.info("[godep] gopkgToml: ${gopkgToml}")
+
+    if (!gopkgToml.exists()) {
+      logger.info("[godep] file ${gopkgToml} not found")
+      return
     }
 
-    @TaskAction
-    void goDep() {
-        File gopkgToml = new File(project.projectDir, "Gopkg.dep")
-        String depCommand
+    File packageDir = new File(project.buildDir, "go/src/${importPath.get()}")
+    logger.info("[godep] packageDir : ${packageDir}")
 
-        if (!gopkgToml.exists()) {
-	  return
-        }
-
-        File packageDir = new File(project.buildDir, "go/src/${importPath.get()}")
-
-	gopkgToml.withReader { reader ->
-	    while (line = reader.readLine()) {
+    String line = ""
+    gopkgToml.withReader { reader ->
+      while (line = reader.readLine()) {
               logger.info("[godep] processing line ${line}")
               def (repository, tag) = line.tokenize( '#' )
+              def scheme = ~/^https:\/\//
+              def cloneDirStr = repository - scheme
+              def repoDirToDelete = new File("${project.buildDir}/go/src/${cloneDirStr}")
+              def versionFile =  new File(repoDirToDelete, ".pkversion")
+              logger.info("[godep] versionF   : ${versionFile}")
+              if (versionFile.exists()) { 
+                 def version = versionFile.getText('UTF-8').trim()
+                 logger.info("[godep] version   : |${version}|")
+                 if (version.equals(tag)) {
+                    logger.info("[godep] version ${version} already cloned...skipping.")
+                    continue
+                 }
+              }
+              def cloneDir = new File("${project.buildDir}/go/src/${cloneDirStr}").getParentFile()
+              def baseName = new File("${project.buildDir}/go/src/${cloneDirStr}").getName()
+              if (repository.contains("https://github.com/golang/net")) {
+                cloneDir        = new File("${project.buildDir}/go/src/golang.org/x")
+                repoDirToDelete = new File("${project.buildDir}/go/src/golang.org/x/net")
+              }
+              repoDirToDelete.deleteDir()
+              cloneDir.mkdirs()
+              def commandToExecute = "cd ${cloneDir} ; git clone ${repository} ; cd ${baseName} ; echo '${tag}' > .pkversion; git reset --hard ${tag}"
               logger.info("[godep] repository: ${repository}")
-              logger.info("[godep] tag       : ${tag}")
+              logger.info("[godep] tag       : |${tag}|")
+              logger.info("[godep] cloneDir  : ${cloneDir}")
+              logger.info("[godep] delete    : ${repoDirToDelete}")
+              logger.info("[godep] git clone : ${commandToExecute}")
+              project.exec(new Action<ExecSpec>() {
+              @Override
+                void execute(ExecSpec execSpec) {
+                  execSpec.environment('GOPATH', "${project.buildDir}/go")
+                  execSpec.commandLine('/bin/sh', '-c', "${commandToExecute}")
+                }
+              })
             }
         }
 
-        project.exec(new Action<ExecSpec>() {
-            @Override
-            void execute(ExecSpec execSpec) {
-                execSpec.environment('GOPATH', "${project.buildDir}/go")
-                execSpec.commandLine('/bin/sh', '-c', "cd ${packageDir} && dep ${depCommand}")
-            }
-        })
     }
 }
