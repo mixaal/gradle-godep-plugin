@@ -49,18 +49,23 @@ class GoDepTask extends DefaultTask {
 
     @TaskAction
     void goDep() {
-        File gopkgToml = new File(project.projectDir, "Gopkg.toml")
+        File gopkgToml = new File(project.projectDir, "Gopkg.dep")
         String depCommand
 
         if (!gopkgToml.exists()) {
-            depCommand = 'init'
-        } else {
-            depCommand = 'ensure'
+	  return
         }
 
         File packageDir = new File(project.buildDir, "go/src/${importPath.get()}")
 
-        logger.info("[godep] dep ${depCommand}")
+	gopkgToml.withReader { reader ->
+	    while (line = reader.readLine()) {
+              logger.info("[godep] processing line ${line}")
+              def (repository, tag) = line.tokenize( '#' )
+              logger.info("[godep] repository: ${repository}")
+              logger.info("[godep] tag       : ${tag}")
+            }
+        }
 
         project.exec(new Action<ExecSpec>() {
             @Override
